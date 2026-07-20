@@ -1,20 +1,21 @@
 import re
+import os
 import time
 import requests
 import logging
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # --------------------------
-# SUA CONFIGURAÇÃO
+# CONFIGURAÇÕES
 # --------------------------
 GDRIVE_URL = "https://drive.google.com/file/d/11xLQKuz4uicx-SFIr2zLbp9whDSvnXbE/view?usp=drivesdk"
-PORTA = 8080
+PORTA = int(os.environ.get("PORT", 8080))  # ✅ Usa porta do Render!
 MAX_TENTATIVAS = 3
 BUFFER_PARAMS = "buffer=4000000&timeout=10000&reconnect=1"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0.0.0 Safari/537.36"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-lista_pronta = "#EXTM3U\n# Carregando...\n"
+lista_pronta = "#EXTM3U\n# Aguardando...\n"
 
 def extrair_id_gdrive(url):
     m = re.search(r"/d/([a-zA-Z0-9_-]+)", url)
@@ -33,12 +34,12 @@ def baixar_lista(url):
         except Exception as e:
             logging.warning(f"Erro download: {e}")
             time.sleep(3)
-    raise ValueError("Falha ao baixar lista do Drive")
+    raise ValueError("Falha ao baixar lista")
 
 def processar_lista(texto):
     linhas = [l.strip() for l in texto.splitlines() if l.strip()]
     if not linhas or not linhas[0].startswith("#EXTM3U"):
-        raise ValueError("Lista inválida ou sem cabeçalho #EXTM3U")
+        raise ValueError("Lista inválida")
     
     canais = []
     i = 1
@@ -52,7 +53,7 @@ def processar_lista(texto):
         else:
             i += 1
 
-    logging.info(f"📺 Total encontrado: {len(canais)} canais — SEM TESTE DE BLOQUEIO")
+    logging.info(f"📺 {len(canais)} canais encontrados")
 
     saida = ["#EXTM3U"]
     for c in canais:
@@ -67,13 +68,12 @@ class Servidor(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/vnd.apple.mpegurl; charset=utf-8")
             self.send_header("Access-Control-Allow-Origin", "*")
-            self.send_header("Cache-Control", "public, max-age=3600")
             self.end_headers()
             self.wfile.write(lista_pronta.encode("utf-8"))
         else:
             self.send_response(200)
             self.end_headers()
-            self.wfile.write(b"OK — Acesse /lista.m3u")
+            self.wfile.write(b"OK")
 
 def atualizar_loop():
     global lista_pronta
@@ -82,7 +82,7 @@ def atualizar_loop():
             link = link_direto_gdrive(GDRIVE_URL)
             texto = baixar_lista(link)
             lista_pronta = processar_lista(texto)
-            logging.info("✅ Lista pronta! Todos os canais carregados.")
+            logging.info("✅ Lista atualizada!")
         except Exception as e:
             logging.error(f"❌ Erro: {e}")
         time.sleep(6 * 60 * 60)
@@ -90,6 +90,7 @@ def atualizar_loop():
 def iniciar():
     from threading import Thread
     Thread(target=atualizar_loop, daemon=True).start()
+    logging.info(f"🌐 Rodando na porta {PORTA}")
     HTTPServer(("0.0.0.0", PORTA), Servidor).serve_forever()
 
 if __name__ == "__main__":
